@@ -1,0 +1,17 @@
+{
+    "folders": [
+      {
+        "name": "bosh",
+        "path": ".",
+      },
+      {
+        "name": "bosh_azure_cpi",
+        "path": "./src/bosh_azure_cpi",
+      },
+    ],
+    "settings": {
+      "files.exclude": {
+        "bosh_azure_cpi": true,
+      },
+    },
+  }

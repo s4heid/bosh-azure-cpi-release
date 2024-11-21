@@ -1,0 +1,51 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+$LOAD_PATH.unshift File.expand_path('../lib', __dir__)
+
+require 'bosh_azure_cpi'
+require 'irb'
+require 'irb/completion'
+require 'ostruct'
+require 'optparse'
+require 'securerandom'
+
+
+
+config_file = nil
+
+opts_parser = OptionParser.new do |opts|
+  opts.on('-c', '--config FILE') { |file| config_file = file }
+end
+
+opts_parser.parse!
+
+unless config_file
+  puts opts_parser
+  exit(1)
+end
+
+@config = Psych.load_file(config_file)
+
+module ConsoleHelpers
+  def cpi
+    @cpi ||= Bosh::AzureCloud::Cloud.new(@config, 1)
+  end
+
+  def registry
+    cpi.registry
+  end
+end
+
+cloud_config = OpenStruct.new(logger: Bosh::AzureCloud::CPILogger.get_logger(STDOUT))
+
+Bosh::Clouds::Config.configure(cloud_config)
+
+include ConsoleHelpers
+
+@logger       = Bosh::Clouds::Config.logger
+@azure_client = Bosh::AzureCloud::AzureClient.new(cpi.config.azure, @logger)
+
+
+disk_cid = 'xtremedisk'
+@cpi.update_disk(disk_cid, 32000, { 'storage_account_type' => 'Premium_LRS' })

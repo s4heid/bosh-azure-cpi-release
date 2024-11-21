@@ -1,0 +1,73 @@
+// For format details, see https://aka.ms/devcontainer.json.
+{
+	"build": {
+		"dockerfile": "Dockerfile",
+		"args": {
+			"BOSH_CLI_VERSION": "7.6.3",
+			"CHRUBY_VERSION": "0.3.9"
+		}
+	},
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"Shopify.ruby-extensions-pack",
+				"Shopify.ruby-lsp",
+				"eamodio.gitlens",
+				"redhat.vscode-yaml",
+				"timonwong.shellcheck",
+				"mutantdino.resourcemonitor",
+				"ms-azuretools.vscode-azure-github-copilot",
+				"dewski.simplecov"
+			],
+			"settings": {
+				"terraform.languageServer.enable": true,
+				"simplecov.coverageDirectory": "./src/bosh_azure_cpi/coverage",
+				"[ruby]": {
+					"editor.defaultFormatter": "Shopify.ruby-lsp",
+					"editor.formatOnSave": true,
+					"editor.formatOnType": true,
+					"editor.tabSize": 2,
+					"editor.insertSpaces": true,
+					"files.trimTrailingWhitespace": true,
+					"files.insertFinalNewline": true,
+					"files.trimFinalNewlines": true,
+					"editor.rulers": [
+						120
+					],
+					"editor.semanticHighlighting.enabled": true
+				}
+			}
+		}
+	},
+	"features": {
+		"azure-cli": "latest",
+		"terraform": {
+			"version": "latest",
+			"tflint": "latest",
+			"terragrunt": "latest"
+		},
+		"ghcr.io/devcontainers/features/go:1": {}
+	},
+	"remoteEnv": {
+		// Add environment variables here. Update the values to match your environment.
+		"BOSH_AZURE_TENANT_ID": "",
+		"BOSH_AZURE_SUBSCRIPTION_ID": "",
+		"BOSH_AZURE_CLIENT_ID": "",
+		"BOSH_AZURE_CLIENT_SECRET": "",
+		"BOSH_AZURE_SSH_PUBLIC_KEY": "",
+		// You can optionally set these environment variables to customize the environment.
+		"ENVIRONMENT_NAME": "xtremebosh",
+		"ENVIRONMENT_PREFIX": "rg-sh-",
+		"BOSH_AZURE_ENVIRONMENT": "AzureCloud",
+		"BOSH_AZURE_LOCATION": "eastus",
+		"BOSH_AZURE_STEMCELL_ID": "bosh-azure-hyperv-ubuntu-xenial-go_agent",
+		"BOSH_AZURE_VNET_NAME": "azure_bosh_network",
+		"BOSH_AZURE_SUBNET_NAME": "azure_bosh_subnet",
+		"BOSH_AZURE_DEFAULT_RESOURCE_GROUP_NAME": "rg-sh-xtremebosh-default-rg",
+		"AZURE_USE_MANAGED_DISKS": "true"
+	},
+	"remoteUser": "vscode",
+	"postAttachCommand": [
+		".devcontainer/install.sh"
+	]
+}
