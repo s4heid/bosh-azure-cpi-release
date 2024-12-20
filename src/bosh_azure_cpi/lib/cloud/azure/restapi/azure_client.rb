@@ -1338,6 +1338,23 @@ module Bosh::AzureCloud
       images
     end
 
+    def list_compute_gallery_image_versions(location, gallery_name, image_definition)
+      images = []
+      url =  "/subscriptions/#{uri_escape(@azure_config.subscription_id)}"
+      url += "/resourceGroups/#{uri_escape(@azure_config.resource_group_name)}"
+      url += "/providers/#{REST_API_PROVIDER_COMPUTE}"
+      url += "/galleries/#{gallery_name}"
+      url += "/images/#{image_definition}"
+      url += '/versions'
+
+      result = get_resource_by_id(url, params = {'api-version' => '2023-07-03'})
+      result['value']&.each do |value|
+        image = parse_platform_image(value)
+        images << image
+      end
+      images
+    end
+
     # Network/Public IP
 
     # Create a public IP

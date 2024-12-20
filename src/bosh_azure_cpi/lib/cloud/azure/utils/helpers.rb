@@ -506,7 +506,15 @@ module Bosh::AzureCloud
       end
 
       def is_light_stemcell?
-        !@image.nil?
+        is_platform_image? || is_compute_gallery_image?
+      end
+
+      def is_platform_image?
+        !@image.nil? && %w[publisher offer sku version].all? { |k| @image.key?(k) }
+      end
+
+      def is_compute_gallery_image?
+        !@image.nil? && %w[gallery definition version].all? { |k| @image.key?(k) }
       end
 
       def is_windows?
@@ -517,7 +525,7 @@ module Bosh::AzureCloud
       # @See https://docs.microsoft.com/en-us/rest/api/compute/virtualmachines/virtualmachines-create-or-update
       #
       def image_reference
-        return nil unless is_light_stemcell?
+        return nil unless is_platform_image?
 
         {
           'publisher' => @image['publisher'],

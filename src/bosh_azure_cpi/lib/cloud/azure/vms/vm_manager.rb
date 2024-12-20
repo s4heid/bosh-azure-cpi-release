@@ -141,8 +141,12 @@ module Bosh::AzureCloud
       vm_params[:os_disk], vm_params[:ephemeral_disk], vm_params[:ephemeral_os_disk] = _build_disks(instance_id, stemcell_info, vm_props)
       vm_params[:os_type] = stemcell_info.os_type
 
-      if stemcell_info.is_light_stemcell?
+      if stemcell_info.is_platform_image?
+        @logger.info("create - The stemcell is a light stemcell (platform image). Setting image_reference: #{stemcell_info.image_reference}}.")
         vm_params[:image_reference] = stemcell_info.image_reference
+      elsif stemcell_info.is_compute_gallery_image?
+        @logger.info("create - The stemcell is a light stemcell (compute gallery image). Setting image_id: #{stemcell_info.uri}}.")
+        vm_params[:image_id] = stemcell_info.uri
       elsif @use_managed_disks
         vm_params[:image_id] = stemcell_info.uri
       else
