@@ -513,6 +513,10 @@ module Bosh::AzureCloud
         @os_type == OS_TYPE_WINDOWS
       end
 
+      def is_compute_gallery_image?
+        !@image.nil? && @image.key?('gallery_name') && @image.key?('gallery_image_name') && @image.key?('version')
+      end
+
       # This will be used when creating VMs
       # @See https://docs.microsoft.com/en-us/rest/api/compute/virtualmachines/virtualmachines-create-or-update
       #
@@ -525,6 +529,20 @@ module Bosh::AzureCloud
           'sku' => @image['sku'],
           'version' => @image['version']
         }
+      end
+
+      def image_reference_id(subscription_id, resource_group_name)
+        return nil unless is_compute_gallery_image?
+        return nil if subscription_id.nil? || resource_group_name.nil?
+
+        image_id =  "/subscriptions/#{subscription_id}"
+        image_id += "/resourceGroups/#{resource_group_name}"
+        image_id += "/providers/Microsoft.Compute"
+        image_id += "/galleries/#{stemcell_info.metadata['gallery_name']}"
+        image_id += "/images/#{stemcell_info.metadata['gallery_image_name']}"
+        image_id += "/versions/#{stemcell_info.version}"
+
+        { 'id' => image_id }
       end
     end
 

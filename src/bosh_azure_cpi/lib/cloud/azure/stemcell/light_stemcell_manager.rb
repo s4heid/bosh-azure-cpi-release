@@ -60,8 +60,27 @@ module Bosh::AzureCloud
 
     def _platform_image_exists?(location, stemcell_properties)
       stemcell_info = StemcellInfo.new('', stemcell_properties)
-      @logger.debug("list_platform_image_versions(#{location}, #{stemcell_info.image['publisher']}, #{stemcell_info.image['offer']}, #{stemcell_info.image['sku']})")
-      versions = @azure_client.list_platform_image_versions(location, stemcell_info.image['publisher'], stemcell_info.image['offer'], stemcell_info.image['sku'])
+
+      if (stemcell_info.image.keys & %w[publisher, offer, sku]).all?
+        @logger.debug("list_platform_image_versions(#{location}, #{stemcell_info.image['publisher']}, #{stemcell_info.image['offer']}, #{stemcell_info.image['sku']})")
+        versions = @azure_client.list_platform_image_versions(
+          location,
+          stemcell_info.image['publisher'],
+          stemcell_info.image['offer'],
+          stemcell_info.image['sku']
+        )
+      elsif (stemcell_info.image.keys & %w[gallery_name, gallery_image_name]).all?
+        @logger.debug("list_compute_gallery_image_versions(#{location}, #{stemcell_info.image['gallery_name']}, #{stemcell_info.image['gallery_image_name']}, #{stemcell_info.image['resource_group']})")
+        versions = @azure_client.list_compute_gallery_image_versions(
+          location,
+          stemcell_info.image['gallery_name'],
+          stemcell_info.image['gallery_image_name'],
+          stemcell_info.image['resource_group']
+        )
+      else
+        cloud_error("The image property of the stemcell is invalid. It should contain either 'publisher, offer, sku' or 'gallery_name, gallery_image_name'")
+      end
+
       version = versions.find { |v| v[:name] == stemcell_info.image['version'] }
       @logger.debug("list_platform_image_versions: The version '#{stemcell_info.image['version']}' of the image is not found") if version.nil?
       !version.nil?

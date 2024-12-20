@@ -143,6 +143,8 @@ module Bosh::AzureCloud
 
       if stemcell_info.is_light_stemcell?
         vm_params[:image_reference] = stemcell_info.image_reference
+      elsif stemcell_info.is_compute_gallery_image?
+        vm_params[:image_reference] = stemcell_info.image_reference_id(@azure_config.subscription_id, @azure_config.resource_group_name)
       elsif @use_managed_disks
         vm_params[:image_id] = stemcell_info.uri
       else
