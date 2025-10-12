@@ -1,0 +1,65 @@
+// For format details, see https://aka.ms/devcontainer.json.
+{
+	"build": {
+		"dockerfile": "Dockerfile",
+		"args": {
+			"BOSH_CLI_VERSION": "7.6.3",
+			"CHRUBY_VERSION": "0.3.9"
+		}
+	},
+	"runArgs": [
+		"--env-file",
+		".devcontainer/devcontainer.env"
+	],
+	"workspaceFolder": "/workspaces/bosh-azure-cpi-release",
+	"workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/bosh-azure-cpi-release,type=bind,consistency=cached",
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"Shopify.ruby-extensions-pack",
+				"Shopify.ruby-lsp",
+				"eamodio.gitlens",
+				"redhat.vscode-yaml",
+				"timonwong.shellcheck",
+				"ms-azuretools.vscode-azure-github-copilot",
+				"dewski.simplecov"
+			],
+			"settings": {
+				"terraform.languageServer.enable": true,
+				"simplecov.coverageDirectory": "/workspaces/bosh-azure-cpi-release/src/bosh_azure_cpi/coverage",
+				"[ruby]": {
+					"editor.defaultFormatter": "Shopify.ruby-lsp",
+					"editor.formatOnSave": true,
+					"editor.formatOnType": true,
+					"editor.tabSize": 2,
+					"editor.insertSpaces": true,
+					"files.trimTrailingWhitespace": true,
+					"files.insertFinalNewline": true,
+					"files.trimFinalNewlines": true,
+					"editor.rulers": [
+						120
+					],
+					"editor.semanticHighlighting.enabled": true
+				},
+				"rubyLsp.formatter": "rubocop",
+				"rubyLsp.bundleGemfile": "/workspaces/bosh-azure-cpi-release/.devcontainer/Gemfile",
+				"rubyLsp.featureFlags": {
+					"fullTestDiscovery": true
+				}
+			}
+		}
+	},
+	"features": {
+		"azure-cli": "latest",
+		"terraform": {
+			"version": "latest",
+			"tflint": "latest",
+			"terragrunt": "latest"
+		},
+		"ghcr.io/devcontainers/features/go:1": {}
+	},
+	"remoteUser": "vscode",
+	"postCreateCommand": [
+		".devcontainer/install.sh"
+	]
+}

@@ -1,0 +1,5 @@
+variables.tfvars
+/infra
+*.tgz
+cpi.cfg
+vendor/
