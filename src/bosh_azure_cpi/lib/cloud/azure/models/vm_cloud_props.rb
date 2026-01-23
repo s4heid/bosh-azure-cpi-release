@@ -20,6 +20,7 @@ module Bosh::AzureCloud
     attr_reader :tags
     attr_reader :capacity_reservation_group
     attr_reader :capacity_reservation_group_id
+    attr_reader :security_profile
 
     # Below defines are for test purpose
     # NOTE: The following 3 attr_writer (and their paired readers above) are explicitly separate (instead of using `attr_accessor`)
@@ -98,6 +99,8 @@ module Bosh::AzureCloud
 
       @capacity_reservation_group     = vm_properties['capacity_reservation_group']
       @capacity_reservation_group_id  = vm_properties['capacity_reservation_group_id']
+
+      @security_profile = _parse_security_profile(vm_properties['security_profile'])
     end
 
     private
@@ -193,6 +196,17 @@ module Bosh::AzureCloud
         end
       end
       application_gateways.compact
+    end
+
+    # @return [Hash, nil] Parsed security profile configuration
+    def _parse_security_profile(security_profile_config)
+      return nil if security_profile_config.nil?
+
+      {
+        security_type: security_profile_config.fetch('security_type', 'TrustedLaunch'),
+        secure_boot_enabled: security_profile_config.fetch('secure_boot_enabled', nil),
+        v_tpm_enabled: security_profile_config.fetch('v_tpm_enabled', nil)
+      }
     end
 
     # @return [Bosh::AzureCloud::AvailabilitySetConfig]
