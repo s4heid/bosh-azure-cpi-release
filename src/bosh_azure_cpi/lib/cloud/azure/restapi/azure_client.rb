@@ -486,6 +486,17 @@ module Bosh::AzureCloud
         }
       end
 
+      unless vm_params[:security_profile].nil?
+        uefi_settings = {}
+        uefi_settings['secureBootEnabled'] = vm_params[:security_profile][:secure_boot_enabled] unless vm_params[:security_profile][:secure_boot_enabled].nil?
+        uefi_settings['vTpmEnabled'] = vm_params[:security_profile][:v_tpm_enabled] unless vm_params[:security_profile][:v_tpm_enabled].nil?
+
+        vm['properties']['securityProfile'] = {
+          'securityType' => vm_params[:security_profile][:security_type]
+        }
+        vm['properties']['securityProfile']['uefiSettings'] = uefi_settings unless uefi_settings.empty?
+      end
+
       params = {
         'validating' => 'true'
       }

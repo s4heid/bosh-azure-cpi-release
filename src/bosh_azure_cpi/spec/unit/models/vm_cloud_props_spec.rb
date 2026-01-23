@@ -637,5 +637,99 @@ describe Bosh::AzureCloud::VMCloudProps do
       end
     end
 
+    context 'when security_profile is specified' do
+      context 'with full configuration' do
+        let(:vm_cloud_props) do
+          Bosh::AzureCloud::VMCloudProps.new(
+            {
+              'instance_type' => 'Standard_D2s_v5',
+              'security_profile' => {
+                'security_type' => 'TrustedLaunch',
+                'secure_boot_enabled' => true,
+                'v_tpm_enabled' => true
+              }
+            }, azure_config_managed
+          )
+        end
+
+        it 'captures the config correctly' do
+          expect(vm_cloud_props.security_profile).not_to be_nil
+          expect(vm_cloud_props.security_profile[:security_type]).to eq('TrustedLaunch')
+          expect(vm_cloud_props.security_profile[:secure_boot_enabled]).to be(true)
+          expect(vm_cloud_props.security_profile[:v_tpm_enabled]).to be(true)
+        end
+      end
+
+      context 'with only security_type specified' do
+        let(:vm_cloud_props) do
+          Bosh::AzureCloud::VMCloudProps.new(
+            {
+              'instance_type' => 'Standard_D2s_v5',
+              'security_profile' => {
+                'security_type' => 'TrustedLaunch'
+              }
+            }, azure_config_managed
+          )
+        end
+
+        it 'uses default security_type and nil for uefi_settings' do
+          expect(vm_cloud_props.security_profile).not_to be_nil
+          expect(vm_cloud_props.security_profile[:security_type]).to eq('TrustedLaunch')
+          expect(vm_cloud_props.security_profile[:secure_boot_enabled]).to be_nil
+          expect(vm_cloud_props.security_profile[:v_tpm_enabled]).to be_nil
+        end
+      end
+
+      context 'with empty security_profile hash' do
+        let(:vm_cloud_props) do
+          Bosh::AzureCloud::VMCloudProps.new(
+            {
+              'instance_type' => 'Standard_D2s_v5',
+              'security_profile' => {}
+            }, azure_config_managed
+          )
+        end
+
+        it 'uses default security_type TrustedLaunch' do
+          expect(vm_cloud_props.security_profile).not_to be_nil
+          expect(vm_cloud_props.security_profile[:security_type]).to eq('TrustedLaunch')
+        end
+      end
+
+      context 'with secure_boot disabled for debugging' do
+        let(:vm_cloud_props) do
+          Bosh::AzureCloud::VMCloudProps.new(
+            {
+              'instance_type' => 'Standard_D2s_v5',
+              'security_profile' => {
+                'security_type' => 'TrustedLaunch',
+                'secure_boot_enabled' => false,
+                'v_tpm_enabled' => true
+              }
+            }, azure_config_managed
+          )
+        end
+
+        it 'captures secure_boot_enabled as false' do
+          expect(vm_cloud_props.security_profile[:secure_boot_enabled]).to be(false)
+          expect(vm_cloud_props.security_profile[:v_tpm_enabled]).to be(true)
+        end
+      end
+    end
+
+    context 'when security_profile is not specified' do
+      let(:vm_cloud_props) do
+        Bosh::AzureCloud::VMCloudProps.new(
+          {
+            'instance_type' => 'Standard_D1'
+          }, azure_config_managed
+        )
+      end
+
+      it 'should be nil' do
+        expect(vm_cloud_props.security_profile).to be_nil
+      end
+    end
+
   end
 end
