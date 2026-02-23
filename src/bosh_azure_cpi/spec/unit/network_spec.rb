@@ -77,4 +77,108 @@ describe Bosh::AzureCloud::Network do
       expect(network.spec).to eq(network_spec)
     end
   end
+
+  describe '#nic_group' do
+    context 'when nic_group is specified in the network spec' do
+      let(:network_spec) do
+        {
+          'ip' => '10.0.0.5',
+          'nic_group' => '1',
+          'cloud_properties' => {
+            'virtual_network_name' => 'foo',
+            'subnet_name' => 'bar'
+          }
+        }
+      end
+
+      it 'should return the nic_group from the spec' do
+        network = Bosh::AzureCloud::Network.new(azure_config, 'my-network', network_spec)
+        expect(network.nic_group).to eq('1')
+      end
+    end
+
+    context 'when nic_group is not specified in the network spec' do
+      let(:network_spec) do
+        {
+          'ip' => '10.0.0.5',
+          'cloud_properties' => {
+            'virtual_network_name' => 'foo',
+            'subnet_name' => 'bar'
+          }
+        }
+      end
+
+      it 'should default to the network name' do
+        network = Bosh::AzureCloud::Network.new(azure_config, 'my-network', network_spec)
+        expect(network.nic_group).to eq('my-network')
+      end
+    end
+  end
+end
+
+describe Bosh::AzureCloud::ManualNetwork do
+  let(:azure_config) { mock_azure_config }
+
+  describe '#nic_group' do
+    context 'when nic_group is specified' do
+      let(:network_spec) do
+        {
+          'ip' => '10.0.0.5',
+          'nic_group' => '1',
+          'cloud_properties' => {
+            'virtual_network_name' => 'foo',
+            'subnet_name' => 'bar'
+          }
+        }
+      end
+
+      it 'should inherit nic_group from Network base class' do
+        network = Bosh::AzureCloud::ManualNetwork.new(azure_config, 'default', network_spec)
+        expect(network.nic_group).to eq('1')
+      end
+    end
+
+    context 'with IPv6 address' do
+      let(:network_spec) do
+        {
+          'ip' => 'fd00::5',
+          'nic_group' => '1',
+          'cloud_properties' => {
+            'virtual_network_name' => 'foo',
+            'subnet_name' => 'bar'
+          }
+        }
+      end
+
+      it 'should accept IPv6 addresses' do
+        network = Bosh::AzureCloud::ManualNetwork.new(azure_config, 'default', network_spec)
+        expect(network.private_ip).to eq('fd00::5')
+        expect(network.nic_group).to eq('1')
+      end
+    end
+  end
+end
+
+describe Bosh::AzureCloud::DynamicNetwork do
+  let(:azure_config) { mock_azure_config }
+
+  describe '#nic_group' do
+    context 'when nic_group is specified' do
+      let(:network_spec) do
+        {
+          'type' => 'dynamic',
+          'nic_group' => '2',
+          'cloud_properties' => {
+            'virtual_network_name' => 'foo',
+            'subnet_name' => 'bar'
+          }
+        }
+      end
+
+      it 'should inherit nic_group from Network base class' do
+        network = Bosh::AzureCloud::DynamicNetwork.new(azure_config, 'dynamic-net', network_spec)
+        expect(network.nic_group).to eq('2')
+      end
+    end
+  end
 end

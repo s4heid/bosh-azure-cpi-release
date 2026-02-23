@@ -173,4 +173,198 @@ describe Bosh::AzureCloud::NetworkConfigurator do
       end
     end
   end
+
+  describe '#nic_groups' do
+    context 'when no nic_group is specified (backward compatibility)' do
+      let(:network_spec) do
+        {
+          'network1' => {
+            'type' => 'manual',
+            'default' => %w[dns gateway],
+            'ip' => '10.0.0.5',
+            'cloud_properties' => {
+              'virtual_network_name' => 'foo',
+              'subnet_name' => 'bar'
+            }
+          }
+        }
+      end
+
+      it 'should create one nic_group per network (each network = its own NIC)' do
+        nc = Bosh::AzureCloud::NetworkConfigurator.new(azure_config, network_spec)
+        expect(nc.nic_groups.length).to eq(1)
+        expect(nc.nic_groups[0].length).to eq(1)
+        expect(nc.nic_groups[0][0].nic_group).to eq('network1')
+      end
+    end
+
+    context 'when two networks have no nic_group (backward compatibility with multiple NICs)' do
+      let(:network_spec) do
+        {
+          'network1' => {
+            'type' => 'manual',
+            'default' => %w[dns gateway],
+            'ip' => '10.0.0.5',
+            'cloud_properties' => {
+              'virtual_network_name' => 'foo',
+              'subnet_name' => 'bar'
+            }
+          },
+          'network2' => {
+            'type' => 'manual',
+            'ip' => '10.1.0.5',
+            'cloud_properties' => {
+              'virtual_network_name' => 'foo',
+              'subnet_name' => 'baz'
+            }
+          }
+        }
+      end
+
+      it 'should create one nic_group per network (separate NICs)' do
+        nc = Bosh::AzureCloud::NetworkConfigurator.new(azure_config, network_spec)
+        expect(nc.nic_groups.length).to eq(2)
+        expect(nc.nic_groups[0].length).to eq(1)
+        expect(nc.nic_groups[1].length).to eq(1)
+      end
+
+      it 'should put the primary network group first' do
+        nc = Bosh::AzureCloud::NetworkConfigurator.new(azure_config, network_spec)
+        expect(nc.nic_groups[0][0].nic_group).to eq('network1')
+      end
+    end
+
+    context 'when two networks share the same nic_group (dual-stack)' do
+      let(:network_spec) do
+        {
+          'ipv4' => {
+            'type' => 'manual',
+            'default' => %w[dns gateway],
+            'ip' => '10.0.0.5',
+            'nic_group' => '1',
+            'cloud_properties' => {
+              'virtual_network_name' => 'foo',
+              'subnet_name' => 'bar'
+            }
+          },
+          'ipv6' => {
+            'type' => 'manual',
+            'ip' => 'fd00::5',
+            'nic_group' => '1',
+            'cloud_properties' => {
+              'virtual_network_name' => 'foo',
+              'subnet_name' => 'bar-v6'
+            }
+          }
+        }
+      end
+
+      it 'should group both networks into a single NIC group' do
+        nc = Bosh::AzureCloud::NetworkConfigurator.new(azure_config, network_spec)
+        expect(nc.nic_groups.length).to eq(1)
+        expect(nc.nic_groups[0].length).to eq(2)
+      end
+
+      it 'should contain both networks in the group' do
+        nc = Bosh::AzureCloud::NetworkConfigurator.new(azure_config, network_spec)
+        ips = nc.nic_groups[0].map(&:private_ip)
+        expect(ips).to contain_exactly('10.0.0.5', 'fd00::5')
+      end
+    end
+
+    context 'when networks are split across multiple nic_groups (multi-NIC dual-stack)' do
+      let(:network_spec) do
+        {
+          'nic1-v4' => {
+            'type' => 'manual',
+            'default' => %w[dns gateway],
+            'ip' => '10.0.0.5',
+            'nic_group' => '1',
+            'cloud_properties' => {
+              'virtual_network_name' => 'foo',
+              'subnet_name' => 'bar'
+            }
+          },
+          'nic1-v6' => {
+            'type' => 'manual',
+            'ip' => 'fd00::5',
+            'nic_group' => '1',
+            'cloud_properties' => {
+              'virtual_network_name' => 'foo',
+              'subnet_name' => 'bar-v6'
+            }
+          },
+          'nic2-v4' => {
+            'type' => 'manual',
+            'ip' => '10.1.0.5',
+            'nic_group' => '2',
+            'cloud_properties' => {
+              'virtual_network_name' => 'foo',
+              'subnet_name' => 'baz'
+            }
+          }
+        }
+      end
+
+      it 'should create two nic_groups' do
+        nc = Bosh::AzureCloud::NetworkConfigurator.new(azure_config, network_spec)
+        expect(nc.nic_groups.length).to eq(2)
+      end
+
+      it 'should put the primary network group first' do
+        nc = Bosh::AzureCloud::NetworkConfigurator.new(azure_config, network_spec)
+        primary_group_ips = nc.nic_groups[0].map(&:private_ip)
+        expect(primary_group_ips).to include('10.0.0.5')
+      end
+
+      it 'should group networks sharing nic_group together' do
+        nc = Bosh::AzureCloud::NetworkConfigurator.new(azure_config, network_spec)
+        group1_ips = nc.nic_groups[0].map(&:private_ip)
+        group2_ips = nc.nic_groups[1].map(&:private_ip)
+        expect(group1_ips).to contain_exactly('10.0.0.5', 'fd00::5')
+        expect(group2_ips).to contain_exactly('10.1.0.5')
+      end
+    end
+
+    context 'when vip network is present alongside nic_groups' do
+      let(:network_spec) do
+        {
+          'default' => {
+            'type' => 'manual',
+            'default' => %w[dns gateway],
+            'ip' => '10.0.0.5',
+            'nic_group' => '1',
+            'cloud_properties' => {
+              'virtual_network_name' => 'foo',
+              'subnet_name' => 'bar'
+            }
+          },
+          'v6' => {
+            'type' => 'manual',
+            'ip' => 'fd00::5',
+            'nic_group' => '1',
+            'cloud_properties' => {
+              'virtual_network_name' => 'foo',
+              'subnet_name' => 'bar-v6'
+            }
+          },
+          'public' => {
+            'type' => 'vip'
+          }
+        }
+      end
+
+      it 'should not include the vip network in nic_groups' do
+        nc = Bosh::AzureCloud::NetworkConfigurator.new(azure_config, network_spec)
+        all_networks_in_groups = nc.nic_groups.flatten
+        expect(all_networks_in_groups.none? { |n| n.is_a?(Bosh::AzureCloud::VipNetwork) }).to be true
+      end
+
+      it 'should still group non-vip networks correctly' do
+        nc = Bosh::AzureCloud::NetworkConfigurator.new(azure_config, network_spec)
+        expect(nc.nic_groups.length).to eq(1)
+        expect(nc.nic_groups[0].length).to eq(2)
+      end
+    end
+  end
 end
