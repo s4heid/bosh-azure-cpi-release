@@ -1,0 +1,8 @@
+azure_client_id       = "${BOSH_AZURE_CLIENT_ID}"
+azure_client_secret   = "${BOSH_AZURE_CLIENT_SECRET}"
+azure_subscription_id = "${BOSH_AZURE_SUBSCRIPTION_ID}"
+azure_tenant_id       = "${BOSH_AZURE_TENANT_ID}"
+location              = "${BOSH_AZURE_LOCATION}"
+azure_environment     = "${BOSH_AZURE_ENVIRONMENT}"
+env_name              = "${ENVIRONMENT_NAME}"
+resource_group_prefix = "${ENVIRONMENT_PREFIX}"
