@@ -28,7 +28,7 @@ module Bosh::AzureCloud
 
       metadata = stemcell_properties.dup
       version = make_semver_compliant(metadata['version'])
-      image_definition = build_image_definition_name(metadata)
+      image_definition, definition_exists = resolve_image_definition(metadata)
 
       image_sha256 = calculate_image_sha256(image_path)
       @logger.info("Stemcell image SHA256 checksum: #{image_sha256}")
@@ -48,12 +48,19 @@ module Bosh::AzureCloud
       stemcell_name = blob_creation_callback.call(image_path, metadata)
 
       @logger.info("Creating gallery image definition and version for stemcell '#{stemcell_name}'")
-      create_gallery_image(stemcell_name, image_definition, version, location, metadata)
+      create_gallery_image(
+        stemcell_name,
+        image_definition,
+        version,
+        location,
+        metadata,
+        definition_exists: definition_exists
+      )
 
       stemcell_name
     end
 
-    def create_gallery_image(stemcell_name, image_definition, version, location, metadata)
+    def create_gallery_image(stemcell_name, image_definition, version, location, metadata, definition_exists: nil)
       gallery_name = @azure_config.compute_gallery_name
       existing_image = @azure_client.get_gallery_image_version(gallery_name, image_definition, version)
 
@@ -61,8 +68,11 @@ module Bosh::AzureCloud
         return handle_existing_gallery_image(existing_image, stemcell_name, gallery_name, image_definition, version, metadata)
       end
 
-      existing_definition = @azure_client.get_gallery_image_definition(gallery_name, image_definition)
-      if existing_definition.nil?
+      if definition_exists.nil?
+        definition_exists = !@azure_client.get_gallery_image_definition(gallery_name, image_definition).nil?
+      end
+
+      unless definition_exists
         image_definition_params = build_image_definition_params(location, metadata)
         create_gallery_image_definition(gallery_name, image_definition, image_definition_params)
       else
@@ -215,7 +225,7 @@ module Bosh::AzureCloud
 
     def build_image_definition_params(location, metadata)
       os_type = normalize_os_type(metadata['os_type'])
-      architecture = CpuArchitecture.normalize(metadata['architecture'])
+      _, architecture = image_definition_profile(metadata)
       image_metadata = JSON.parse(metadata['image'])
       hyperv_generation = build_hyperv_generation(metadata)
       features = build_features_array(metadata)
@@ -227,7 +237,7 @@ module Bosh::AzureCloud
       }.merge(image_metadata)
 
       params['features'] = features if features
-      params['architecture'] = architecture if architecture
+      params['architecture'] = architecture
 
       params
     end
@@ -415,14 +425,93 @@ module Bosh::AzureCloud
       name = metadata['name']
       cloud_error("Could not find stemcell name in metadata.") if name.nil?
 
-      return name if gen1_image?(metadata)
+      generation, architecture = image_definition_profile(metadata)
+      "#{name}-#{generation}-#{architecture.downcase}"
+    end
 
-      "#{name}-#{vm_generation(metadata)}"
+    def resolve_image_definition(metadata)
+      gallery_name = @azure_config.compute_gallery_name
+      canonical_name = build_image_definition_name(metadata)
+      definitions = @azure_client.list_gallery_image_definitions(gallery_name)
+      definitions_by_name = definitions.each_with_object({}) do |definition, result|
+        result[definition['name']] = definition if definition['name']
+      end
+
+      canonical_definition = definitions_by_name[canonical_name]
+      if canonical_definition
+        unless compatible_image_definition?(canonical_definition, canonical_name, metadata)
+          generation, architecture = image_definition_profile(metadata)
+          cloud_error("Gallery image definition '#{gallery_name}/#{canonical_name}' exists but is incompatible with the requested #{generation}/#{architecture} stemcell profile.")
+        end
+
+        return [canonical_name, true]
+      end
+
+      legacy_image_definition_names(metadata).each do |legacy_name|
+        legacy_definition = definitions_by_name[legacy_name]
+        next unless legacy_definition
+        next unless compatible_image_definition?(legacy_definition, legacy_name, metadata)
+
+        @logger.info("Reusing compatible legacy gallery image definition '#{gallery_name}/#{legacy_name}'")
+        return [legacy_name, true]
+      end
+
+      [canonical_name, false]
+    end
+
+    def legacy_image_definition_names(metadata)
+      name = metadata['name']
+      generation, architecture = image_definition_profile(metadata)
+
+      case [generation, architecture]
+      when ['gen1', CpuArchitecture::X64]
+        ["#{name}-gen1", name]
+      when ['gen2', CpuArchitecture::X64]
+        ["#{name}-gen2", name]
+      when ['gen2', CpuArchitecture::ARM64]
+        ["#{name}-gen2"]
+      else
+        []
+      end
+    end
+
+    def compatible_image_definition?(definition, definition_name, metadata)
+      properties = definition['properties'] || {}
+      identifier = properties['identifier'] || {}
+      generation, architecture = image_definition_profile(metadata)
+      existing_architecture = CpuArchitecture.normalize(properties['architecture']) || CpuArchitecture::X64
+      existing_hyperv_generation = properties['hyperVGeneration'] || 'V1'
+
+      existing_architecture == architecture &&
+        existing_hyperv_generation.to_s.casecmp?(build_hyperv_generation(metadata)) &&
+        properties['osType'].to_s.casecmp?(normalize_os_type(metadata['os_type'])) &&
+        properties['osState'].to_s.casecmp?('Generalized') &&
+        identifier['publisher'].to_s.casecmp?(STEMCELL_PUBLISHER) &&
+        identifier['offer'].to_s.casecmp?(definition_name) &&
+        identifier['sku'].to_s.casecmp?(generation)
+    end
+
+    def image_definition_profile(metadata)
+      generation = vm_generation(metadata)
+      architecture = CpuArchitecture.normalize(metadata['architecture']) || CpuArchitecture::X64
+
+      unless [CpuArchitecture::X64, CpuArchitecture::ARM64].include?(architecture)
+        cloud_error("Unsupported stemcell architecture '#{metadata['architecture']}'.")
+      end
+
+      if generation == 'gen1' && architecture == CpuArchitecture::ARM64
+        cloud_error('Azure ARM64 stemcells require Hyper-V generation 2.')
+      end
+
+      [generation, architecture]
     end
 
     def vm_generation(metadata)
       metadata ||= {}
-      metadata['generation'] || DEFAULT_HYPERV_GENERATION
+      generation = (metadata['generation'] || DEFAULT_HYPERV_GENERATION).to_s.downcase
+      cloud_error("Unsupported Hyper-V generation '#{metadata['generation']}'.") unless ['gen1', 'gen2'].include?(generation)
+
+      generation
     end
 
     def gen1_image?(metadata)

@@ -71,8 +71,17 @@ describe Bosh::AzureCloud::Cloud do
           image_data = JSON.parse(stemcell_info.image)
           generation = stemcell_properties.fetch('generation')
           expect(generation).not_to be_nil
-          expected_offer = generation.downcase == 'gen1' ? stemcell_properties['name'] : "#{stemcell_properties['name']}-#{generation}"
-          expect(image_data['offer']).to eq expected_offer
+          architecture = Bosh::AzureCloud::Helpers::CpuArchitecture.normalize(stemcell_properties['architecture']) ||
+                         Bosh::AzureCloud::Helpers::CpuArchitecture::X64
+          canonical_offer = "#{stemcell_properties['name']}-#{generation.downcase}-#{architecture.downcase}"
+          legacy_offers = if generation.downcase == 'gen1'
+                            ["#{stemcell_properties['name']}-gen1", stemcell_properties['name']]
+                          elsif architecture == Bosh::AzureCloud::Helpers::CpuArchitecture::X64
+                            ["#{stemcell_properties['name']}-gen2", stemcell_properties['name']]
+                          else
+                            ["#{stemcell_properties['name']}-gen2"]
+                          end
+          expect([canonical_offer] + legacy_offers).to include(image_data['offer'])
           expect(image_data['sku']).to eq generation
 
           # Replicate image into other location

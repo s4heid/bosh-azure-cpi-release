@@ -62,6 +62,30 @@ describe Bosh::AzureCloud::AzureClient do
     end
   end
 
+  describe '#list_gallery_image_definitions' do
+    let(:uri) { "/subscriptions/#{subscription_id}/resourceGroups/#{resource_group}/providers/Microsoft.Compute/galleries/#{gallery_name}/images" }
+    let(:definitions) do
+      [
+        { 'name' => 'ubuntu-gen1-x64' },
+        { 'name' => 'ubuntu-gen2-arm64' }
+      ]
+    end
+
+    it 'returns all image definitions in the gallery' do
+      expect(azure_client).to receive(:get_resources_by_url)
+        .with(uri, { 'api-version' => '2025-03-03' })
+        .and_return({ 'value' => definitions })
+
+      expect(azure_client.list_gallery_image_definitions(gallery_name)).to eq(definitions)
+    end
+
+    it 'returns an empty list when the gallery has no definitions' do
+      allow(azure_client).to receive(:get_resources_by_url).and_return(nil)
+
+      expect(azure_client.list_gallery_image_definitions(gallery_name)).to eq([])
+    end
+  end
+
   describe '#get_gallery_image_definition' do
     let(:uri) { "/subscriptions/#{subscription_id}/resourceGroups/#{resource_group}/providers/Microsoft.Compute/galleries/#{gallery_name}/images/#{image_definition}" }
 

@@ -19,12 +19,33 @@ describe Bosh::AzureCloud::ComputeGalleryManager do
     described_class.new(azure_config, azure_client, blob_manager, default_storage_account_name)
   end
 
+  def gallery_image_definition(name, generation: 'V1', architecture: 'x64', os_type: 'Linux')
+    sku = generation.to_s.casecmp?('V2') ? 'gen2' : 'gen1'
+    properties = {
+      'identifier' => {
+        'publisher' => 'bosh',
+        'offer' => name,
+        'sku' => sku
+      },
+      'osType' => os_type,
+      'osState' => 'Generalized'
+    }
+    properties['hyperVGeneration'] = generation unless generation.nil?
+    properties['architecture'] = architecture unless architecture.nil?
+
+    {
+      'name' => name,
+      'properties' => properties
+    }
+  end
+
   before do
     allow(azure_config).to receive(:compute_gallery_name).and_return(gallery_name)
     allow(azure_config).to receive(:compute_gallery_replicas).and_return(replica_count)
     allow(Bosh::Clouds::Config).to receive(:logger).and_return(logger)
     allow(logger).to receive(:info)
     allow(logger).to receive(:debug)
+    allow(logger).to receive(:error)
     allow(compute_gallery_manager).to receive(:flock).and_yield
   end
 
@@ -449,6 +470,7 @@ describe Bosh::AzureCloud::ComputeGalleryManager do
       allow(File).to receive(:open).and_yield(StringIO.new('fake-image-content'))
       allow_any_instance_of(Digest::SHA256).to receive(:hexdigest).and_return(fake_sha256)
       allow(blob_creation_callback).to receive(:call).and_return('bosh-stemcell-1234')
+      allow(azure_client).to receive(:list_gallery_image_definitions).and_return([])
       allow(compute_gallery_manager).to receive(:create_gallery_image)
     end
 
@@ -463,11 +485,16 @@ describe Bosh::AzureCloud::ComputeGalleryManager do
         hash_including(
           'image_sha256' => fake_sha256,
           'compute_gallery_name' => gallery_name,
-          'compute_gallery_image_definition' => 'ubuntu-1804'
+          'compute_gallery_image_definition' => 'ubuntu-1804-gen1-x64'
         )
       )
       expect(compute_gallery_manager).to have_received(:create_gallery_image).with(
-        'bosh-stemcell-1234', 'ubuntu-1804', '1.0.0', location, anything
+        'bosh-stemcell-1234',
+        'ubuntu-1804-gen1-x64',
+        '1.0.0',
+        location,
+        anything,
+        definition_exists: false
       )
     end
 
@@ -506,7 +533,12 @@ describe Bosh::AzureCloud::ComputeGalleryManager do
           )
 
           expect(compute_gallery_manager).to have_received(:create_gallery_image).with(
-            anything, anything, expected, anything, anything
+            anything,
+            anything,
+            expected,
+            anything,
+            anything,
+            definition_exists: false
           )
         end
       end
@@ -716,7 +748,7 @@ describe Bosh::AzureCloud::ComputeGalleryManager do
         end
 
         it 'normalizes arm64 to Arm64' do
-          props_with_arch = stemcell_properties.merge('architecture' => 'arm64')
+          props_with_arch = stemcell_properties.merge('generation' => 'gen2', 'architecture' => 'arm64')
 
           compute_gallery_manager.create_stemcell_with_gallery(
             image_path, props_with_arch, blob_creation_callback
@@ -727,7 +759,7 @@ describe Bosh::AzureCloud::ComputeGalleryManager do
         end
 
         it 'normalizes ARM64 (uppercase) to Arm64' do
-          props_with_arch = stemcell_properties.merge('architecture' => 'ARM64')
+          props_with_arch = stemcell_properties.merge('generation' => 'gen2', 'architecture' => 'ARM64')
 
           compute_gallery_manager.create_stemcell_with_gallery(
             image_path, props_with_arch, blob_creation_callback
@@ -748,7 +780,7 @@ describe Bosh::AzureCloud::ComputeGalleryManager do
             .with(anything, anything, hash_including('architecture' => 'x64'))
         end
 
-        it 'omits architecture parameter when not present in metadata' do
+        it 'defaults architecture to x64 when not present in metadata' do
           props_without_arch = stemcell_properties.dup
           props_without_arch.delete('architecture')
 
@@ -756,45 +788,168 @@ describe Bosh::AzureCloud::ComputeGalleryManager do
             image_path, props_without_arch, blob_creation_callback
           )
 
-          expect(azure_client).to have_received(:create_gallery_image_definition) do |_gallery, _def, params|
-            expect(params).not_to have_key('architecture')
-          end
+          expect(azure_client).to have_received(:create_gallery_image_definition)
+            .with(anything, anything, hash_including('architecture' => 'x64'))
         end
       end
 
-      context 'image definition naming with generation' do
-        it 'appends generation suffix for gen2 stemcells' do
-          props_with_gen2 = stemcell_properties.merge('generation' => 'gen2')
+      context 'image definition resolution' do
+        {
+          ['gen1', 'x86_64'] => 'ubuntu-1804-gen1-x64',
+          ['gen2', 'x64'] => 'ubuntu-1804-gen2-x64',
+          ['gen2', 'arm64'] => 'ubuntu-1804-gen2-arm64'
+        }.each do |(generation, architecture), expected_name|
+          it "uses canonical naming for #{generation} #{architecture}" do
+            properties = stemcell_properties.merge(
+              'generation' => generation,
+              'architecture' => architecture
+            )
 
-          compute_gallery_manager.create_stemcell_with_gallery(
-            image_path, props_with_gen2, blob_creation_callback
-          )
+            compute_gallery_manager.create_stemcell_with_gallery(
+              image_path, properties, blob_creation_callback
+            )
 
-          expect(azure_client).to have_received(:create_gallery_image_definition) do |_gallery, image_def, _params|
-            expect(image_def).to eq("#{stemcell_properties['name']}-gen2")
+            expect(blob_creation_callback).to have_received(:call).with(
+              image_path,
+              hash_including('compute_gallery_image_definition' => expected_name)
+            )
           end
         end
 
-        it 'does not append suffix for gen1 stemcells' do
-          props_with_gen1 = stemcell_properties.merge('generation' => 'gen1')
+        {
+          ['gen1', 'x86_64', 'ubuntu-1804', nil] => 'ubuntu-1804',
+          ['gen1', 'x86_64', 'ubuntu-1804-gen1', 'x64'] => 'ubuntu-1804-gen1',
+          ['gen2', 'x86_64', 'ubuntu-1804-gen2', 'x64'] => 'ubuntu-1804-gen2',
+          ['gen2', 'x86_64', 'ubuntu-1804', nil] => 'ubuntu-1804',
+          ['gen2', 'arm64', 'ubuntu-1804-gen2', 'Arm64'] => 'ubuntu-1804-gen2'
+        }.each do |(generation, architecture, legacy_name, definition_architecture), expected_name|
+          it "reuses compatible legacy definition #{legacy_name} for #{generation} #{architecture}" do
+            azure_generation = generation == 'gen2' ? 'V2' : 'V1'
+            allow(azure_client).to receive(:list_gallery_image_definitions).and_return(
+              [
+                gallery_image_definition(
+                  legacy_name,
+                  generation: azure_generation,
+                  architecture: definition_architecture
+                )
+              ]
+            )
+            properties = stemcell_properties.merge(
+              'generation' => generation,
+              'architecture' => architecture
+            )
 
-          compute_gallery_manager.create_stemcell_with_gallery(
-            image_path, props_with_gen1, blob_creation_callback
-          )
+            compute_gallery_manager.create_stemcell_with_gallery(
+              image_path, properties, blob_creation_callback
+            )
 
-          expect(azure_client).to have_received(:create_gallery_image_definition) do |_gallery, image_def, _params|
-            expect(image_def).to eq(stemcell_properties['name'])
+            expect(blob_creation_callback).to have_received(:call).with(
+              image_path,
+              hash_including('compute_gallery_image_definition' => expected_name)
+            )
           end
         end
 
-        it 'does not append suffix when generation is not specified' do
+        it 'treats missing legacy architecture and Hyper-V generation as Gen1 x64' do
+          allow(azure_client).to receive(:list_gallery_image_definitions).and_return(
+            [gallery_image_definition('ubuntu-1804', generation: nil, architecture: nil)]
+          )
+          properties = stemcell_properties.merge('generation' => 'gen1', 'architecture' => 'x86_64')
+
           compute_gallery_manager.create_stemcell_with_gallery(
-            image_path, stemcell_properties, blob_creation_callback
+            image_path, properties, blob_creation_callback
           )
 
-          expect(azure_client).to have_received(:create_gallery_image_definition) do |_gallery, image_def, _params|
-            expect(image_def).to eq(stemcell_properties['name'])
-          end
+          expect(blob_creation_callback).to have_received(:call).with(
+            image_path,
+            hash_including('compute_gallery_image_definition' => 'ubuntu-1804')
+          )
+        end
+
+        it 'prefers the canonical definition over compatible legacy definitions' do
+          canonical_name = 'ubuntu-1804-gen2-x64'
+          allow(azure_client).to receive(:list_gallery_image_definitions).and_return(
+            [
+              gallery_image_definition('ubuntu-1804-gen2', generation: 'V2', architecture: 'x64'),
+              gallery_image_definition(canonical_name, generation: 'V2', architecture: 'x64')
+            ]
+          )
+          properties = stemcell_properties.merge('generation' => 'gen2', 'architecture' => 'x64')
+
+          compute_gallery_manager.create_stemcell_with_gallery(
+            image_path, properties, blob_creation_callback
+          )
+
+          expect(blob_creation_callback).to have_received(:call).with(
+            image_path,
+            hash_including('compute_gallery_image_definition' => canonical_name)
+          )
+        end
+
+        it 'creates the canonical Arm64 definition when the legacy Gen2 definition is x64' do
+          allow(azure_client).to receive(:list_gallery_image_definitions).and_return(
+            [gallery_image_definition('ubuntu-1804-gen2', generation: 'V2', architecture: 'x64')]
+          )
+          properties = stemcell_properties.merge('generation' => 'gen2', 'architecture' => 'arm64')
+
+          compute_gallery_manager.create_stemcell_with_gallery(
+            image_path, properties, blob_creation_callback
+          )
+
+          expect(compute_gallery_manager).to have_received(:create_gallery_image).with(
+            anything,
+            'ubuntu-1804-gen2-arm64',
+            anything,
+            anything,
+            anything,
+            definition_exists: false
+          )
+        end
+
+        it 'fails when the canonical definition has an incompatible profile' do
+          allow(azure_client).to receive(:list_gallery_image_definitions).and_return(
+            [gallery_image_definition('ubuntu-1804-gen2-arm64', generation: 'V2', architecture: 'x64')]
+          )
+          properties = stemcell_properties.merge('generation' => 'gen2', 'architecture' => 'arm64')
+
+          expect {
+            compute_gallery_manager.create_stemcell_with_gallery(
+              image_path, properties, blob_creation_callback
+            )
+          }.to raise_error(/exists but is incompatible/)
+          expect(blob_creation_callback).not_to have_received(:call)
+        end
+
+        it 'rejects Gen1 Arm64 before querying the gallery' do
+          properties = stemcell_properties.merge('generation' => 'gen1', 'architecture' => 'arm64')
+
+          expect {
+            compute_gallery_manager.create_stemcell_with_gallery(
+              image_path, properties, blob_creation_callback
+            )
+          }.to raise_error(/ARM64 stemcells require Hyper-V generation 2/)
+          expect(azure_client).not_to have_received(:list_gallery_image_definitions)
+        end
+
+        it 'uses one gallery listing and no individual definition lookup' do
+          legacy_name = 'ubuntu-1804-gen2'
+          allow(azure_client).to receive(:list_gallery_image_definitions).and_return(
+            [gallery_image_definition(legacy_name, generation: 'V2', architecture: 'x64')]
+          )
+          allow(compute_gallery_manager).to receive(:create_gallery_image).and_call_original
+          allow(azure_client).to receive(:get_gallery_image_version).and_return(nil)
+          allow(azure_client).to receive(:create_update_gallery_image_version).and_return({})
+          allow(blob_manager).to receive(:get_blob_uri).and_return('https://test.blob.uri')
+          properties = stemcell_properties.merge('generation' => 'gen2')
+
+          compute_gallery_manager.create_stemcell_with_gallery(
+            image_path, properties, blob_creation_callback
+          )
+
+          expect(azure_client).to have_received(:list_gallery_image_definitions).once
+          expect(azure_client).not_to have_received(:get_gallery_image_definition)
+          expect(azure_client).to have_received(:create_update_gallery_image_version)
+            .with(gallery_name, legacy_name, '1.0.0', anything)
         end
       end
     end
