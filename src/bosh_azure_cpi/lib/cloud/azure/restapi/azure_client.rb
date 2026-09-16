@@ -2212,21 +2212,6 @@ module Bosh::AzureCloud
       http_delete(url)
     end
 
-    # List gallery image definitions
-    # @param [String] gallery_name - Name of gallery.
-    # @return [Array] Gallery image definitions
-    #
-    # @See https://learn.microsoft.com/en-us/rest/api/compute/gallery-images/list-by-gallery
-    #
-    def list_gallery_image_definitions(gallery_name)
-      url = rest_api_url(REST_API_PROVIDER_COMPUTE, REST_API_GALLERIES, name: gallery_name) + "/#{REST_API_IMAGES}"
-      result = get_resources_by_url(url, { 'api-version' => '2025-03-03' })
-      definitions = result && result['value']
-      cloud_error("Could not list image definitions in gallery '#{gallery_name}'.") unless definitions.is_a?(Array)
-
-      definitions
-    end
-
     # Get a gallery image definition
     # @param [String] gallery_name - Name of gallery.
     # @param [String] image_definition - Name of gallery image.

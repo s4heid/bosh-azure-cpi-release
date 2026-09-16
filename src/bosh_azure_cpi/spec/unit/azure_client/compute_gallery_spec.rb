@@ -62,43 +62,6 @@ describe Bosh::AzureCloud::AzureClient do
     end
   end
 
-  describe '#list_gallery_image_definitions' do
-    let(:uri) { URI("https://management.azure.com/subscriptions/#{subscription_id}/resourceGroups/#{resource_group}/providers/Microsoft.Compute/galleries/#{gallery_name}/images?api-version=2025-03-03") }
-    let(:next_uri) { URI("#{uri}&$skiptoken=next") }
-    let(:definitions) do
-      [
-        { 'name' => 'ubuntu-gen1-x64', 'properties' => { 'architecture' => 'x64', 'hyperVGeneration' => 'V1' } },
-        { 'name' => 'ubuntu-gen2-arm64', 'properties' => { 'architecture' => 'Arm64', 'hyperVGeneration' => 'V2' } }
-      ]
-    end
-
-    before do
-      allow(azure_client).to receive(:http_get).with(uri)
-        .and_return(double(body: { 'value' => [definitions.first], 'nextLink' => next_uri.to_s }.to_json))
-    end
-
-    it 'preserves definition properties across every page' do
-      allow(azure_client).to receive(:http_get).with(next_uri)
-        .and_return(double(body: { 'value' => [definitions.last] }.to_json))
-
-      expect(azure_client.list_gallery_image_definitions(gallery_name)).to eq(definitions)
-      expect(azure_client).to have_received(:http_get).with(uri).once
-      expect(azure_client).to have_received(:http_get).with(next_uri).once
-    end
-
-    it 'returns an empty list when the gallery has no definitions' do
-      allow(azure_client).to receive(:http_get).with(uri).and_return(double(body: { 'value' => [] }.to_json))
-
-      expect(azure_client.list_gallery_image_definitions(gallery_name)).to eq([])
-    end
-
-    it 'does not treat interrupted pagination as an empty gallery' do
-      allow(azure_client).to receive(:http_get).with(next_uri).and_raise(Bosh::AzureCloud::AzureNotFoundError)
-
-      expect { azure_client.list_gallery_image_definitions(gallery_name) }.to raise_error(/Could not list image definitions/)
-    end
-  end
-
   describe '#get_gallery_image_definition' do
     let(:uri) { "/subscriptions/#{subscription_id}/resourceGroups/#{resource_group}/providers/Microsoft.Compute/galleries/#{gallery_name}/images/#{image_definition}" }
 

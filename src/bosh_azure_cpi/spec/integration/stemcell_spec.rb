@@ -69,7 +69,10 @@ describe Bosh::AzureCloud::Cloud do
           expect(stemcell_info.is_light_stemcell?).to be_falsey
           expect(stemcell_info.uri).to include "/Microsoft.Compute/galleries/#{@compute_gallery_name}/images/"
           image_data = JSON.parse(stemcell_info.image)
-          expect(image_data['sku']).to eq(stemcell_properties.fetch('generation').downcase)
+          generation = stemcell_properties.fetch('generation').downcase
+          expected_offer = generation == 'gen1' ? stemcell_properties['name'] : "#{stemcell_properties['name']}-#{generation}"
+          expect(image_data['offer']).to eq expected_offer
+          expect(image_data['sku']).to eq generation
 
           # Replicate image into other location
           other_location = ['eastus', 'East US'].include?(@azure_config.location) ? 'West US' : 'East US'
@@ -78,8 +81,8 @@ describe Bosh::AzureCloud::Cloud do
           # Verify image replication
           gallery_image = azure_client.get_gallery_image_version_by_stemcell_name(@compute_gallery_name, @stemcell_id)
           expect(gallery_image).not_to be_nil
-          expect(gallery_image[:image_definition].downcase).to eq(image_data['offer'].downcase)
-          expect(gallery_image[:image_definition].downcase).to eq(stemcell_info.metadata.fetch('compute_gallery_image_definition').downcase)
+          expect(gallery_image[:image_definition]).to eq(expected_offer)
+          expect(stemcell_info.metadata.fetch('compute_gallery_image_definition')).to eq(expected_offer)
           expect(gallery_image[:replica_count]).to eq(1)
           actual_regions = gallery_image[:target_regions].map { |region| region.downcase.gsub(' ', '') }
           expected_regions = [@azure_config.location, other_location].map { |region| region.downcase.gsub(' ', '') }

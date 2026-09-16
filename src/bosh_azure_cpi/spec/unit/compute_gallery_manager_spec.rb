@@ -20,23 +20,11 @@ describe Bosh::AzureCloud::ComputeGalleryManager do
   end
 
   def gallery_image_definition(name, generation: 'V1', architecture: 'x64', os_type: 'Linux')
-    sku = generation.to_s.casecmp?('V2') ? 'gen2' : 'gen1'
-    properties = {
-      'identifier' => {
-        'publisher' => 'bosh',
-        'offer' => name,
-        'sku' => sku
-      },
-      'osType' => os_type,
-      'osState' => 'Generalized'
-    }
+    properties = { 'osType' => os_type }
     properties['hyperVGeneration'] = generation unless generation.nil?
     properties['architecture'] = architecture unless architecture.nil?
 
-    {
-      'name' => name,
-      'properties' => properties
-    }
+    { 'name' => name, 'properties' => properties }
   end
 
   before do
@@ -45,7 +33,6 @@ describe Bosh::AzureCloud::ComputeGalleryManager do
     allow(Bosh::Clouds::Config).to receive(:logger).and_return(logger)
     allow(logger).to receive(:info)
     allow(logger).to receive(:debug)
-    allow(logger).to receive(:error)
     allow(compute_gallery_manager).to receive(:flock).and_yield
   end
 
@@ -475,7 +462,6 @@ describe Bosh::AzureCloud::ComputeGalleryManager do
       allow(File).to receive(:exist?).and_return(true)
       allow(File).to receive(:open) { |_, &block| block.call(StringIO.new('fake-image-content')) }
       allow(blob_creation_callback).to receive(:call).and_return('bosh-stemcell-1234')
-      allow(azure_client).to receive(:list_gallery_image_definitions).and_return([])
       allow(azure_client).to receive(:get_gallery_image_version).and_return(nil)
       allow(azure_client).to receive(:get_gallery_image_definition).and_return(nil)
       allow(azure_client).to receive(:create_gallery_image_definition)
@@ -492,15 +478,13 @@ describe Bosh::AzureCloud::ComputeGalleryManager do
         hash_including(
           'image_sha256' => fake_sha256,
           'compute_gallery_name' => gallery_name,
-          'compute_gallery_image_definition' => 'ubuntu-1804-gen1-x64'
+          'compute_gallery_image_definition' => 'ubuntu-1804'
         )
       )
       expect(azure_client).to have_received(:create_update_gallery_image_version).with(
-        gallery_name, 'ubuntu-1804-gen1-x64', '1.0.0',
-        hash_including('tags' => hash_including('compute_gallery_image_definition' => 'ubuntu-1804-gen1-x64'))
+        gallery_name, 'ubuntu-1804', '1.0.0',
+        hash_including('tags' => hash_including('compute_gallery_image_definition' => 'ubuntu-1804'))
       )
-      expect(azure_client).to have_received(:list_gallery_image_definitions).once
-      expect(azure_client).not_to have_received(:get_gallery_image_definition)
     end
 
     it 'validates location requirement' do
@@ -524,7 +508,7 @@ describe Bosh::AzureCloud::ComputeGalleryManager do
           upload_stemcell('version' => input)
 
           expect(azure_client).to have_received(:create_update_gallery_image_version).with(
-            gallery_name, 'ubuntu-1804-gen1-x64', expected, anything
+            gallery_name, 'ubuntu-1804', expected, anything
           )
         end
       end
@@ -685,114 +669,68 @@ describe Bosh::AzureCloud::ComputeGalleryManager do
       end
 
       [
-        [nil, nil, 'gen1-x64', 'V1', 'x64'],
-        ['gen1', 'x86_64', 'gen1-x64', 'V1', 'x64'],
-        ['GEN2', 'amd64', 'gen2-x64', 'V2', 'x64'],
-        ['gen2', 'aarch64', 'gen2-arm64', 'V2', 'Arm64'],
-        ['gen2', 'ARM64', 'gen2-arm64', 'V2', 'Arm64']
-      ].each do |generation, architecture, suffix, hyperv_generation, azure_architecture|
-        it "publishes #{generation.inspect}/#{architecture.inspect} as #{suffix}" do
+        [nil, nil, 'ubuntu-1804', 'V1', 'x64'],
+        ['gen1', 'x86_64', 'ubuntu-1804', 'V1', 'x64'],
+        ['GEN2', 'amd64', 'ubuntu-1804-gen2', 'V2', 'x64'],
+        ['gen2', 'aarch64', 'ubuntu-1804-gen2-arm64', 'V2', 'Arm64'],
+        ['gen2', 'ARM64', 'ubuntu-1804-gen2-arm64', 'V2', 'Arm64']
+      ].each do |generation, architecture, name, hyperv_generation, azure_architecture|
+        it "publishes #{generation.inspect}/#{architecture.inspect} as #{name}" do
           upload_stemcell('generation' => generation, 'architecture' => architecture)
 
-          name = "ubuntu-1804-#{suffix}"
           expect(azure_client).to have_received(:create_gallery_image_definition).with(
             gallery_name, name, hash_including(
               'offer' => name, 'hyperVGeneration' => hyperv_generation, 'architecture' => azure_architecture
             )
           )
+          expect(blob_creation_callback).to have_received(:call)
+            .with(image_path, hash_including('compute_gallery_image_definition' => name))
         end
       end
 
       [
         ['gen1', 'x64', 'ubuntu-1804', nil, nil],
-        ['gen1', 'x64', 'ubuntu-1804-gen1', 'V1', 'x64'],
-        ['gen2', 'x64', 'ubuntu-1804', 'V2', nil],
-        ['GEN2', 'x64', 'Ubuntu-1804-GEN2', 'V2', 'x64'],
-        ['gen2', 'arm64', 'ubuntu-1804-gen2', 'V2', 'Arm64']
-      ].each do |generation, architecture, legacy_name, hyperv_generation, azure_architecture|
-        it "reuses #{legacy_name} for #{generation}/#{architecture} without rewriting it" do
-          definition = gallery_image_definition(legacy_name, generation: hyperv_generation, architecture: azure_architecture)
-          allow(azure_client).to receive(:list_gallery_image_definitions).and_return([definition])
+        ['gen1', 'x64', 'ubuntu-1804', 'V1', 'x64'],
+        ['gen2', 'x64', 'ubuntu-1804-gen2', 'V2', nil],
+        ['GEN2', 'x64', 'ubuntu-1804-gen2', 'V2', 'x64'],
+        ['gen2', 'arm64', 'ubuntu-1804-gen2-arm64', 'V2', 'Arm64']
+      ].each do |generation, architecture, name, hyperv_generation, azure_architecture|
+        it "reuses the existing #{name} definition for #{generation}/#{architecture}" do
+          definition = gallery_image_definition(name, generation: hyperv_generation, architecture: azure_architecture)
+          allow(azure_client).to receive(:get_gallery_image_definition).and_return(definition)
 
           upload_stemcell('generation' => generation, 'architecture' => architecture)
 
           expect(azure_client).not_to have_received(:create_gallery_image_definition)
           expect(azure_client).to have_received(:create_update_gallery_image_version)
-            .with(gallery_name, legacy_name, '1.0.0', anything)
-          expect(blob_creation_callback).to have_received(:call)
-            .with(image_path, hash_including('compute_gallery_image_definition' => legacy_name))
-          expect(azure_client).to have_received(:list_gallery_image_definitions).once
-          expect(azure_client).not_to have_received(:get_gallery_image_definition)
+            .with(gallery_name, name, '1.0.0', anything)
         end
-      end
-
-      it 'prefers an existing canonical definition regardless of casing or listing order' do
-        canonical_name = 'UBUNTU-1804-GEN2-X64'
-        allow(azure_client).to receive(:list_gallery_image_definitions).and_return([
-          gallery_image_definition('ubuntu-1804-gen2', generation: 'V2'),
-          gallery_image_definition(canonical_name, generation: 'V2')
-        ])
-
-        upload_stemcell('generation' => 'gen2')
-
-        expect(azure_client).not_to have_received(:create_gallery_image_definition)
-        expect(azure_client).to have_received(:create_update_gallery_image_version)
-          .with(gallery_name, canonical_name, '1.0.0', anything)
       end
 
       {
         'hyperVGeneration' => 'V1',
         'osType' => 'Windows',
-        'osState' => 'Specialized',
-        'identifier' => { 'publisher' => 'another-publisher', 'offer' => 'ubuntu-1804-gen2', 'sku' => 'gen2' }
+        'architecture' => 'Arm64'
       }.each do |property, value|
-        it "skips an alias with incompatible #{property} and uses the next compatible alias" do
+        it "refuses to reuse a definition with an immutable #{property} mismatch" do
           incompatible = gallery_image_definition('ubuntu-1804-gen2', generation: 'V2')
           incompatible['properties'][property] = value
-          allow(azure_client).to receive(:list_gallery_image_definitions)
-            .and_return([gallery_image_definition('ubuntu-1804', generation: 'V2'), incompatible])
+          allow(azure_client).to receive(:get_gallery_image_definition).and_return(incompatible)
 
-          upload_stemcell('generation' => 'gen2')
-
+          expect { upload_stemcell('generation' => 'gen2') }.to raise_error(/#{property}: expected/)
           expect(azure_client).not_to have_received(:create_gallery_image_definition)
-          expect(azure_client).to have_received(:create_update_gallery_image_version)
-            .with(gallery_name, 'ubuntu-1804', '1.0.0', anything)
+          expect(azure_client).not_to have_received(:create_update_gallery_image_version)
         end
       end
 
-      it 'does not upload when the gallery inventory cannot be read' do
-        allow(azure_client).to receive(:list_gallery_image_definitions).and_raise(Bosh::Clouds::CloudError, 'List failed')
-
-        expect { upload_stemcell }.to raise_error(/List failed/)
-        expect(blob_creation_callback).not_to have_received(:call)
-      end
-
       it 'publishes the same x64 and Arm64 version under separate definitions' do
-        allow(azure_client).to receive(:list_gallery_image_definitions).and_return([
-          gallery_image_definition('ubuntu-1804-gen2', generation: 'V2')
-        ])
-
         upload_stemcell('generation' => 'gen2', 'architecture' => 'x64')
         upload_stemcell('generation' => 'gen2', 'architecture' => 'arm64')
 
         expect(azure_client).to have_received(:create_gallery_image_definition)
+          .with(gallery_name, 'ubuntu-1804-gen2', hash_including('architecture' => 'x64')).once
+        expect(azure_client).to have_received(:create_gallery_image_definition)
           .with(gallery_name, 'ubuntu-1804-gen2-arm64', hash_including('architecture' => 'Arm64')).once
-        expect(azure_client).to have_received(:create_update_gallery_image_version)
-          .with(gallery_name, 'ubuntu-1804-gen2', '1.0.0', anything)
-        expect(azure_client).to have_received(:create_update_gallery_image_version)
-          .with(gallery_name, 'ubuntu-1804-gen2-arm64', '1.0.0', anything)
-      end
-
-      it 'rejects an incompatible canonical definition even with different casing and a compatible legacy alias' do
-        allow(azure_client).to receive(:list_gallery_image_definitions).and_return([
-          gallery_image_definition('UBUNTU-1804-GEN2-ARM64', generation: 'V2', architecture: 'x64'),
-          gallery_image_definition('ubuntu-1804-gen2', generation: 'V2', architecture: 'Arm64')
-        ])
-
-        expect { upload_stemcell('generation' => 'gen2', 'architecture' => 'arm64') }
-          .to raise_error(/exists but is incompatible/)
-        expect(blob_creation_callback).not_to have_received(:call)
-        expect(azure_client).not_to have_received(:create_gallery_image_definition)
       end
 
       [
@@ -802,11 +740,10 @@ describe Bosh::AzureCloud::ComputeGalleryManager do
       ].each do |generation, architecture, error|
         it "rejects #{generation}/#{architecture} before contacting Azure or uploading" do
           expect { upload_stemcell('generation' => generation, 'architecture' => architecture) }.to raise_error(error)
-          expect(azure_client).not_to have_received(:list_gallery_image_definitions)
+          expect(azure_client).not_to have_received(:get_gallery_image_definition)
           expect(blob_creation_callback).not_to have_received(:call)
         end
       end
-
     end
   end
 end
