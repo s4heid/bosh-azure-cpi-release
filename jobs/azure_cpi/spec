@@ -102,10 +102,7 @@ properties:
       MII...
       -----END CERTIFICATE-----
   azure.compute_gallery_name:
-    description: |
-      The name of the Compute Gallery to use for creating VMs.
-      Image definitions are named <stemcell-name>, suffixed with the Hyper-V generation for
-      gen2 stemcells and with the architecture for non-x64 stemcells, e.g. <stemcell-name>-gen2-arm64.
+    description: The name of the Compute Gallery to use for creating VMs
   azure.compute_gallery_replicas:
     description: The number of replicas to use for Compute Gallery images
     default: 3

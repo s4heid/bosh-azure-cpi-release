@@ -423,8 +423,6 @@ module Bosh::AzureCloud
       parts.join('-')
     end
 
-    # Architecture, Hyper-V generation and OS type are immutable in Azure Compute Gallery, so an
-    # existing image definition can only be reused when all three match the stemcell being uploaded.
     def validate_image_definition_compatibility(gallery_name, image_definition, definition, metadata)
       properties = definition['properties'] || {}
       _, architecture = image_definition_profile(metadata)
@@ -434,7 +432,6 @@ module Bosh::AzureCloud
         'hyperVGeneration' => build_hyperv_generation(metadata),
         'osType' => normalize_os_type(metadata['os_type'])
       }
-      # Azure omits 'architecture' and 'hyperVGeneration' for definitions created with the defaults.
       actual = {
         'architecture' => CpuArchitecture.normalize(properties['architecture']) || CpuArchitecture::X64,
         'hyperVGeneration' => properties['hyperVGeneration'] || 'V1',
