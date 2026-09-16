@@ -9,6 +9,8 @@ module Bosh::AzureCloud
 
     STEMCELL_PUBLISHER = 'bosh'.freeze
     DEFAULT_HYPERV_GENERATION = 'gen1'.freeze
+    # The offer uses the definition name and has a stricter limit than the resource name.
+    MAX_IMAGE_DEFINITION_NAME_LENGTH = 64
 
     def initialize(azure_config, azure_client, blob_manager, default_storage_account_name)
       @azure_config = azure_config
@@ -49,12 +51,7 @@ module Bosh::AzureCloud
 
       @logger.info("Creating gallery image definition and version for stemcell '#{stemcell_name}'")
       create_gallery_image(
-        stemcell_name,
-        image_definition,
-        version,
-        location,
-        metadata,
-        definition_exists: definition_exists
+        stemcell_name, image_definition, version, location, metadata, definition_exists: definition_exists
       )
 
       stemcell_name
@@ -219,7 +216,7 @@ module Bosh::AzureCloud
     end
 
     def build_hyperv_generation(metadata)
-      generation = vm_generation(metadata).downcase
+      generation = vm_generation(metadata)
       "V#{generation.delete_prefix('gen')}"
     end
 
@@ -420,62 +417,47 @@ module Bosh::AzureCloud
       features.empty? ? nil : features
     end
 
-    def build_image_definition_name(metadata)
-      metadata ||= {}
-      name = metadata['name']
-      cloud_error("Could not find stemcell name in metadata.") if name.nil?
+    def build_image_definition_name(name, generation, architecture)
+      suffix = "-#{generation}-#{architecture.downcase}"
+      return "#{name}#{suffix}" if name.length + suffix.length <= MAX_IMAGE_DEFINITION_NAME_LENGTH
 
-      generation, architecture = image_definition_profile(metadata)
-      "#{name}-#{generation}-#{architecture.downcase}"
+      digest = Digest::SHA256.hexdigest(name.downcase)[0, 32]
+      prefix_length = MAX_IMAGE_DEFINITION_NAME_LENGTH - suffix.length - digest.length - 1
+      "#{name[0, prefix_length]}-#{digest}#{suffix}"
     end
 
     def resolve_image_definition(metadata)
+      name = metadata['name']
+      cloud_error("Could not find stemcell name in metadata.") if name.nil?
+      generation, architecture = image_definition_profile(metadata)
+      canonical_name = build_image_definition_name(name, generation, architecture)
+      candidates = [canonical_name, "#{name}-#{generation}"]
+      candidates << name if architecture == CpuArchitecture::X64
+
       gallery_name = @azure_config.compute_gallery_name
-      canonical_name = build_image_definition_name(metadata)
       definitions = @azure_client.list_gallery_image_definitions(gallery_name)
       definitions_by_name = definitions.each_with_object({}) do |definition, result|
-        result[definition['name']] = definition if definition['name']
+        result[definition['name'].downcase] = definition
       end
 
-      canonical_definition = definitions_by_name[canonical_name]
-      if canonical_definition
-        unless compatible_image_definition?(canonical_definition, canonical_name, metadata)
-          generation, architecture = image_definition_profile(metadata)
-          cloud_error("Gallery image definition '#{gallery_name}/#{canonical_name}' exists but is incompatible with the requested #{generation}/#{architecture} stemcell profile.")
+      candidates.each do |candidate|
+        definition = definitions_by_name[candidate.downcase]
+        next unless definition
+
+        if compatible_image_definition?(definition, metadata)
+          @logger.info("Reusing compatible gallery image definition '#{gallery_name}/#{definition['name']}'")
+          return [definition['name'], true]
         end
 
-        return [canonical_name, true]
-      end
-
-      legacy_image_definition_names(metadata).each do |legacy_name|
-        legacy_definition = definitions_by_name[legacy_name]
-        next unless legacy_definition
-        next unless compatible_image_definition?(legacy_definition, legacy_name, metadata)
-
-        @logger.info("Reusing compatible legacy gallery image definition '#{gallery_name}/#{legacy_name}'")
-        return [legacy_name, true]
+        if candidate == canonical_name
+          cloud_error("Gallery image definition '#{gallery_name}/#{definition['name']}' exists but is incompatible with the requested #{generation}/#{architecture} stemcell profile.")
+        end
       end
 
       [canonical_name, false]
     end
 
-    def legacy_image_definition_names(metadata)
-      name = metadata['name']
-      generation, architecture = image_definition_profile(metadata)
-
-      case [generation, architecture]
-      when ['gen1', CpuArchitecture::X64]
-        ["#{name}-gen1", name]
-      when ['gen2', CpuArchitecture::X64]
-        ["#{name}-gen2", name]
-      when ['gen2', CpuArchitecture::ARM64]
-        ["#{name}-gen2"]
-      else
-        []
-      end
-    end
-
-    def compatible_image_definition?(definition, definition_name, metadata)
+    def compatible_image_definition?(definition, metadata)
       properties = definition['properties'] || {}
       identifier = properties['identifier'] || {}
       generation, architecture = image_definition_profile(metadata)
@@ -487,7 +469,7 @@ module Bosh::AzureCloud
         properties['osType'].to_s.casecmp?(normalize_os_type(metadata['os_type'])) &&
         properties['osState'].to_s.casecmp?('Generalized') &&
         identifier['publisher'].to_s.casecmp?(STEMCELL_PUBLISHER) &&
-        identifier['offer'].to_s.casecmp?(definition_name) &&
+        identifier['offer'].to_s.casecmp?(definition['name']) &&
         identifier['sku'].to_s.casecmp?(generation)
     end
 
@@ -515,7 +497,7 @@ module Bosh::AzureCloud
     end
 
     def gen1_image?(metadata)
-      vm_generation(metadata).downcase == 'gen1'
+      vm_generation(metadata) == 'gen1'
     end
   end
 end

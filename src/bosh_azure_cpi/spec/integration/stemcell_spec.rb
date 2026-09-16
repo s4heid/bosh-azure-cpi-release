@@ -69,20 +69,7 @@ describe Bosh::AzureCloud::Cloud do
           expect(stemcell_info.is_light_stemcell?).to be_falsey
           expect(stemcell_info.uri).to include "/Microsoft.Compute/galleries/#{@compute_gallery_name}/images/"
           image_data = JSON.parse(stemcell_info.image)
-          generation = stemcell_properties.fetch('generation')
-          expect(generation).not_to be_nil
-          architecture = Bosh::AzureCloud::Helpers::CpuArchitecture.normalize(stemcell_properties['architecture']) ||
-                         Bosh::AzureCloud::Helpers::CpuArchitecture::X64
-          canonical_offer = "#{stemcell_properties['name']}-#{generation.downcase}-#{architecture.downcase}"
-          legacy_offers = if generation.downcase == 'gen1'
-                            ["#{stemcell_properties['name']}-gen1", stemcell_properties['name']]
-                          elsif architecture == Bosh::AzureCloud::Helpers::CpuArchitecture::X64
-                            ["#{stemcell_properties['name']}-gen2", stemcell_properties['name']]
-                          else
-                            ["#{stemcell_properties['name']}-gen2"]
-                          end
-          expect([canonical_offer] + legacy_offers).to include(image_data['offer'])
-          expect(image_data['sku']).to eq generation
+          expect(image_data['sku']).to eq(stemcell_properties.fetch('generation').downcase)
 
           # Replicate image into other location
           other_location = ['eastus', 'East US'].include?(@azure_config.location) ? 'West US' : 'East US'
@@ -91,6 +78,8 @@ describe Bosh::AzureCloud::Cloud do
           # Verify image replication
           gallery_image = azure_client.get_gallery_image_version_by_stemcell_name(@compute_gallery_name, @stemcell_id)
           expect(gallery_image).not_to be_nil
+          expect(gallery_image[:image_definition].downcase).to eq(image_data['offer'].downcase)
+          expect(gallery_image[:image_definition].downcase).to eq(stemcell_info.metadata.fetch('compute_gallery_image_definition').downcase)
           expect(gallery_image[:replica_count]).to eq(1)
           actual_regions = gallery_image[:target_regions].map { |region| region.downcase.gsub(' ', '') }
           expected_regions = [@azure_config.location, other_location].map { |region| region.downcase.gsub(' ', '') }

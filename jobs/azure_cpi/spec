@@ -102,7 +102,13 @@ properties:
       MII...
       -----END CERTIFICATE-----
   azure.compute_gallery_name:
-    description: The name of the Compute Gallery to use for creating VMs
+    description: |
+      The name of the Compute Gallery to use for creating VMs.
+      New image definitions use <stemcell-name>-<generation>-<architecture>; compatible
+      legacy definitions are reused, with case-insensitive name matching.
+      Names exceeding Azure's 64-character offer limit use
+      <stemcell-prefix>-<hash>-<generation>-<architecture>. The hash is the first 32
+      hexadecimal characters of SHA-256 of the full, lowercased stemcell name.
   azure.compute_gallery_replicas:
     description: The number of replicas to use for Compute Gallery images
     default: 3
