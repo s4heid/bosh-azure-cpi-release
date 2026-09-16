@@ -9,8 +9,6 @@ module Bosh::AzureCloud
 
     STEMCELL_PUBLISHER = 'bosh'.freeze
     DEFAULT_HYPERV_GENERATION = 'gen1'.freeze
-    # The offer uses the definition name and has a stricter limit than the resource name.
-    MAX_IMAGE_DEFINITION_NAME_LENGTH = 64
 
     def initialize(azure_config, azure_client, blob_manager, default_storage_account_name)
       @azure_config = azure_config
@@ -417,20 +415,11 @@ module Bosh::AzureCloud
       features.empty? ? nil : features
     end
 
-    def build_image_definition_name(name, generation, architecture)
-      suffix = "-#{generation}-#{architecture.downcase}"
-      return "#{name}#{suffix}" if name.length + suffix.length <= MAX_IMAGE_DEFINITION_NAME_LENGTH
-
-      digest = Digest::SHA256.hexdigest(name.downcase)[0, 32]
-      prefix_length = MAX_IMAGE_DEFINITION_NAME_LENGTH - suffix.length - digest.length - 1
-      "#{name[0, prefix_length]}-#{digest}#{suffix}"
-    end
-
     def resolve_image_definition(metadata)
       name = metadata['name']
       cloud_error("Could not find stemcell name in metadata.") if name.nil?
       generation, architecture = image_definition_profile(metadata)
-      canonical_name = build_image_definition_name(name, generation, architecture)
+      canonical_name = "#{name}-#{generation}-#{architecture.downcase}"
       candidates = [canonical_name, "#{name}-#{generation}"]
       candidates << name if architecture == CpuArchitecture::X64
 

@@ -807,61 +807,6 @@ describe Bosh::AzureCloud::ComputeGalleryManager do
         end
       end
 
-      context 'long stemcell names' do
-        [
-          ['gen1', 'x64', 55, "#{'a' * 22}-b35439a4ac6f0948b6d6f9e3c6af0f5f-gen1-x64"],
-          ['gen2', 'x64', 55, "#{'a' * 22}-b35439a4ac6f0948b6d6f9e3c6af0f5f-gen2-x64"],
-          ['gen2', 'arm64', 53, "#{'a' * 20}-a3f01b6939256127582ac8ae9fb47a38-gen2-arm64"]
-        ].each do |generation, architecture, series_limit, shortened_name|
-          it "shortens #{generation}/#{architecture} only when the offer would exceed 64 characters" do
-            upload_stemcell('name' => 'a' * series_limit, 'generation' => generation, 'architecture' => architecture)
-            unchanged_name = "#{'a' * series_limit}-#{generation}-#{architecture}"
-            expect(azure_client).to have_received(:create_gallery_image_definition)
-              .with(gallery_name, unchanged_name, hash_including('offer' => unchanged_name))
-
-            upload_stemcell('name' => 'a' * (series_limit + 1), 'generation' => generation, 'architecture' => architecture)
-            expect(azure_client).to have_received(:create_gallery_image_definition)
-              .with(gallery_name, shortened_name, hash_including('offer' => shortened_name))
-            expect(blob_creation_callback).to have_received(:call)
-              .with(image_path, hash_including('compute_gallery_image_definition' => shortened_name))
-          end
-        end
-
-        it 'distinguishes series which differ only beyond the retained prefix' do
-          names = []
-          allow(azure_client).to receive(:create_gallery_image_definition) { |_, name, _| names << name }
-
-          upload_stemcell('name' => 'a' * 56, 'generation' => 'gen2')
-          upload_stemcell('name' => ('a' * 55) + 'b', 'generation' => 'gen2')
-
-          expect(names.uniq.length).to eq(2)
-          expect(names.map(&:length)).to eq([64, 64])
-        end
-
-        it 'reuses the shortened identity across versions and stemcell-name casing' do
-          name = "#{'a' * 22}-b35439a4ac6f0948b6d6f9e3c6af0f5f-gen2-x64"
-          allow(azure_client).to receive(:list_gallery_image_definitions)
-            .and_return([gallery_image_definition(name, generation: 'V2')])
-
-          upload_stemcell('name' => 'A' * 56, 'generation' => 'gen2', 'version' => '2.0')
-
-          expect(azure_client).not_to have_received(:create_gallery_image_definition)
-          expect(azure_client).to have_received(:create_update_gallery_image_version)
-            .with(gallery_name, name, '2.0.0', anything)
-        end
-
-        it 'continues using a full-length compatible legacy definition' do
-          name = 'a' * 64
-          allow(azure_client).to receive(:list_gallery_image_definitions)
-            .and_return([gallery_image_definition(name)])
-
-          upload_stemcell('name' => name)
-
-          expect(azure_client).not_to have_received(:create_gallery_image_definition)
-          expect(azure_client).to have_received(:create_update_gallery_image_version)
-            .with(gallery_name, name, '1.0.0', anything)
-        end
-      end
     end
   end
 end
