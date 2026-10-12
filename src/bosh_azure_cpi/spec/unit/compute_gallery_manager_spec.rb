@@ -25,6 +25,7 @@ describe Bosh::AzureCloud::ComputeGalleryManager do
     allow(Bosh::Clouds::Config).to receive(:logger).and_return(logger)
     allow(logger).to receive(:info)
     allow(logger).to receive(:debug)
+    allow(logger).to receive(:error)
     allow(compute_gallery_manager).to receive(:flock).and_yield
   end
 
@@ -433,6 +434,40 @@ describe Bosh::AzureCloud::ComputeGalleryManager do
           end
         end
       end
+
+      context 'when the stemcell was uploaded into an image definition named by an older CPI version' do
+        let(:legacy_image_definition) { 'bosh-azure-hyperv-ubuntu-noble-gen2' }
+        let(:blob_metadata) do
+          {
+            'name' => 'bosh-azure-hyperv-ubuntu-noble',
+            'image' => JSON.dump('publisher' => 'bosh', 'offer' => legacy_image_definition, 'sku' => 'gen2', 'version' => '1.0.0'),
+            'compute_gallery_name' => gallery_name,
+            'compute_gallery_image_definition' => legacy_image_definition,
+            'generation' => 'gen2',
+            'os_type' => 'linux'
+          }
+        end
+
+        before do
+          allow(blob_manager).to receive(:get_blob_metadata)
+            .with(default_storage_account_name, 'stemcell', "#{stemcell_name}.vhd")
+            .and_return(blob_metadata)
+          allow(azure_client).to receive(:get_gallery_image_version).and_return(nil)
+          allow(azure_client).to receive(:get_gallery_image_definition).and_return(nil)
+          allow(azure_client).to receive(:create_gallery_image_definition)
+          allow(azure_client).to receive(:create_update_gallery_image_version).and_return(gallery_image)
+          allow(blob_manager).to receive(:get_blob_uri).and_return('https://test.blob.uri')
+        end
+
+        it 'recreates the gallery image in the image definition recorded in the stemcell metadata' do
+          compute_gallery_manager.ensure_gallery_image_in_target_location(stemcell_name, location)
+
+          expect(azure_client).to have_received(:create_gallery_image_definition)
+            .with(gallery_name, legacy_image_definition, hash_including('offer' => legacy_image_definition, 'sku' => 'gen2'))
+          expect(azure_client).to have_received(:create_update_gallery_image_version)
+            .with(gallery_name, legacy_image_definition, '1.0.0', anything)
+        end
+      end
     end
   end
 
@@ -463,11 +498,11 @@ describe Bosh::AzureCloud::ComputeGalleryManager do
         hash_including(
           'image_sha256' => fake_sha256,
           'compute_gallery_name' => gallery_name,
-          'compute_gallery_image_definition' => 'ubuntu-1804'
+          'compute_gallery_image_definition' => 'ubuntu-1804-gen1-x64'
         )
       )
       expect(compute_gallery_manager).to have_received(:create_gallery_image).with(
-        'bosh-stemcell-1234', 'ubuntu-1804', '1.0.0', location, anything
+        'bosh-stemcell-1234', 'ubuntu-1804-gen1-x64', '1.0.0', location, anything
       )
     end
 
@@ -748,7 +783,7 @@ describe Bosh::AzureCloud::ComputeGalleryManager do
             .with(anything, anything, hash_including('architecture' => 'x64'))
         end
 
-        it 'omits architecture parameter when not present in metadata' do
+        it 'defaults to x64 when not present in metadata' do
           props_without_arch = stemcell_properties.dup
           props_without_arch.delete('architecture')
 
@@ -756,46 +791,85 @@ describe Bosh::AzureCloud::ComputeGalleryManager do
             image_path, props_without_arch, blob_creation_callback
           )
 
-          expect(azure_client).to have_received(:create_gallery_image_definition) do |_gallery, _def, params|
-            expect(params).not_to have_key('architecture')
-          end
+          expect(azure_client).to have_received(:create_gallery_image_definition)
+            .with(anything, anything, hash_including('architecture' => 'x64'))
         end
       end
+    end
 
-      context 'image definition naming with generation' do
-        it 'appends generation suffix for gen2 stemcells' do
-          props_with_gen2 = stemcell_properties.merge('generation' => 'gen2')
+    context 'when uploading stemcells of the same series' do
+      let(:image_definitions) { {} }
+      let(:noble_properties) do
+        {
+          'name' => 'bosh-azure-hyperv-ubuntu-noble',
+          'version' => '1.0',
+          'os_type' => 'linux',
+          'architecture' => 'x86_64',
+          'generation' => 'gen2',
+          'security_type' => 'TrustedLaunchSupported'
+        }
+      end
 
-          compute_gallery_manager.create_stemcell_with_gallery(
-            image_path, props_with_gen2, blob_creation_callback
-          )
+      before do
+        allow(compute_gallery_manager).to receive(:create_gallery_image).and_call_original
+        allow(azure_client).to receive(:get_gallery_image_version).and_return(nil)
+        allow(azure_client).to receive(:get_gallery_image_definition) { |_gallery, name| image_definitions[name] }
+        allow(azure_client).to receive(:create_gallery_image_definition) { |_gallery, name, params| image_definitions[name] = params }
+        allow(azure_client).to receive(:create_update_gallery_image_version).and_return({})
+        allow(blob_manager).to receive(:get_blob_uri).and_return('https://test.blob.uri')
+      end
 
-          expect(azure_client).to have_received(:create_gallery_image_definition) do |_gallery, image_def, _params|
-            expect(image_def).to eq("#{stemcell_properties['name']}-gen2")
-          end
-        end
+      def upload_stemcell(properties)
+        compute_gallery_manager.create_stemcell_with_gallery(image_path, properties, blob_creation_callback)
+      end
 
-        it 'does not append suffix for gen1 stemcells' do
-          props_with_gen1 = stemcell_properties.merge('generation' => 'gen1')
+      it 'stores x64 and arm64 stemcells in separate image definitions' do
+        upload_stemcell(noble_properties.merge('architecture' => 'x86_64'))
+        upload_stemcell(noble_properties.merge('architecture' => 'arm64'))
 
-          compute_gallery_manager.create_stemcell_with_gallery(
-            image_path, props_with_gen1, blob_creation_callback
-          )
+        expect(image_definitions.transform_values { |params| params['architecture'] }).to eq(
+          'bosh-azure-hyperv-ubuntu-noble-gen2-x64-tls' => 'x64',
+          'bosh-azure-hyperv-ubuntu-noble-gen2-arm64-tls' => 'Arm64'
+        )
+        expect(azure_client).to have_received(:create_update_gallery_image_version)
+          .with(gallery_name, 'bosh-azure-hyperv-ubuntu-noble-gen2-arm64-tls', '1.0.0', anything)
+      end
 
-          expect(azure_client).to have_received(:create_gallery_image_definition) do |_gallery, image_def, _params|
-            expect(image_def).to eq(stemcell_properties['name'])
-          end
-        end
+      it 'stores stemcells with different security types in separate image definitions' do
+        upload_stemcell(noble_properties.merge('security_type' => 'TrustedLaunchSupported'))
+        upload_stemcell(noble_properties.merge('security_type' => 'TrustedLaunchAndConfidentialVmSupported'))
 
-        it 'does not append suffix when generation is not specified' do
-          compute_gallery_manager.create_stemcell_with_gallery(
-            image_path, stemcell_properties, blob_creation_callback
-          )
+        expect(image_definitions.transform_values { |params| params['features'] }).to eq(
+          'bosh-azure-hyperv-ubuntu-noble-gen2-x64-tls' => [{ 'name' => 'SecurityType', 'value' => 'TrustedLaunchSupported' }],
+          'bosh-azure-hyperv-ubuntu-noble-gen2-x64-tlcvms' => [{ 'name' => 'SecurityType', 'value' => 'TrustedLaunchAndConfidentialVmSupported' }]
+        )
+      end
 
-          expect(azure_client).to have_received(:create_gallery_image_definition) do |_gallery, image_def, _params|
-            expect(image_def).to eq(stemcell_properties['name'])
-          end
-        end
+      it 'stores gen1 and gen2 stemcells in separate image definitions' do
+        upload_stemcell(noble_properties.merge('generation' => 'gen1'))
+        upload_stemcell(noble_properties.merge('generation' => 'gen2'))
+
+        expect(image_definitions.transform_values { |params| params['hyperVGeneration'] }).to eq(
+          'bosh-azure-hyperv-ubuntu-noble-gen1-x64' => 'V1',
+          'bosh-azure-hyperv-ubuntu-noble-gen2-x64-tls' => 'V2'
+        )
+      end
+
+      it 'stores further versions with the same properties in the existing image definition' do
+        upload_stemcell(noble_properties.merge('version' => '1.0'))
+        upload_stemcell(noble_properties.merge('version' => '1.1'))
+
+        expect(image_definitions.keys).to eq(['bosh-azure-hyperv-ubuntu-noble-gen2-x64-tls'])
+        expect(azure_client).to have_received(:create_update_gallery_image_version)
+          .with(gallery_name, 'bosh-azure-hyperv-ubuntu-noble-gen2-x64-tls', '1.1.0', anything)
+      end
+
+      it 'does not upload a stemcell with an unsupported security type' do
+        expect {
+          upload_stemcell(noble_properties.merge('security_type' => 'Unknown'))
+        }.to raise_error(Bosh::Clouds::CloudError, /Unsupported security_type 'Unknown'/)
+
+        expect(blob_creation_callback).not_to have_received(:call)
       end
     end
   end

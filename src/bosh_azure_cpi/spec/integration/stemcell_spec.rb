@@ -70,10 +70,14 @@ describe Bosh::AzureCloud::Cloud do
           expect(stemcell_info.uri).to include "/Microsoft.Compute/galleries/#{@compute_gallery_name}/images/"
           image_data = JSON.parse(stemcell_info.image)
           generation = stemcell_properties.fetch('generation')
-          expect(generation).not_to be_nil
-          expected_offer = generation.downcase == 'gen1' ? stemcell_properties['name'] : "#{stemcell_properties['name']}-#{generation}"
-          expect(image_data['offer']).to eq expected_offer
+          architecture = Bosh::AzureCloud::Helpers::CpuArchitecture.normalize(stemcell_properties.fetch('architecture'))
+          expect(image_data['offer']).to start_with("#{stemcell_properties['name']}-#{generation}-#{architecture.downcase}")
           expect(image_data['sku']).to eq generation
+
+          # Verify the image definition matches the stemcell
+          image_definition = azure_client.get_gallery_image_definition(@compute_gallery_name, image_data['offer'])
+          expect(image_definition.dig('properties', 'architecture')).to eq(architecture)
+          expect(image_definition.dig('properties', 'hyperVGeneration')).to eq(generation.sub('gen', 'V'))
 
           # Replicate image into other location
           other_location = ['eastus', 'East US'].include?(@azure_config.location) ? 'West US' : 'East US'

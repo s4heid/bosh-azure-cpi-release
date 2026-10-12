@@ -6,9 +6,6 @@ module Bosh::AzureCloud
     include Bosh::Exec
     include Helpers
 
-    STEMCELL_PUBLISHER = 'bosh'.freeze
-    DEFAULT_HYPERV_GENERATION = 'gen1'.freeze
-
     def initialize(azure_config, blob_manager, meta_store, storage_account_manager, azure_client)
       @azure_config = azure_config
       @azure_client = azure_client

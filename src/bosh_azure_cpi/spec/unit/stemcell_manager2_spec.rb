@@ -198,6 +198,27 @@ describe Bosh::AzureCloud::StemcellManager2 do
         end
       end
 
+      context 'when the stemcell was uploaded into an image definition named by an older CPI version' do
+        ['bosh-azure-hyperv-ubuntu-jammy-go_agent', 'bosh-azure-hyperv-ubuntu-noble-gen2'].each do |legacy_image_definition|
+          it "deletes the gallery image version in '#{legacy_image_definition}'" do
+            allow(azure_client).to receive(:get_gallery_image_version_by_stemcell_name)
+              .with(gallery_name, stemcell_name)
+              .and_return(
+                gallery_name: gallery_name,
+                image_definition: legacy_image_definition,
+                name: image_version,
+                location: location,
+                tags: { 'stemcell_references' => stemcell_name }
+              )
+
+            stemcell_manager2.delete_stemcell(stemcell_name)
+
+            expect(azure_client).to have_received(:delete_gallery_image_version)
+              .with(gallery_name, legacy_image_definition, image_version)
+          end
+        end
+      end
+
       context 'when stemcell name is not in the gallery image tags' do
         let(:gallery_image_without_name) do
           {
